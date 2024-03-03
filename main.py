@@ -3,6 +3,7 @@ import requests
 from PyPDF2 import PdfReader
 from io import BytesIO
 import logging
+import uvicorn
 
 # Configure logging
 logging.basicConfig(
@@ -12,10 +13,21 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Utility functions
-
 
 def fetch_and_read_pdf(pdf_url):
+    """
+    Fetch a PDF from a given URL and extract its text content.
+
+    This function sends a GET request to the specified URL to retrieve a PDF file.
+    If the request is successful, it reads the PDF content and extracts the text from each page,
+    concatenating all pages' text into a single string.
+
+    Args:
+    pdf_url (str): The URL where the PDF can be accessed.
+
+    Returns:
+    str: A single string containing all extracted text from the PDF.
+    """
     response = requests.get(pdf_url)
     if response.status_code != 200:
         raise HTTPException(
@@ -23,7 +35,9 @@ def fetch_and_read_pdf(pdf_url):
         )
     file = BytesIO(response.content)
     reader = PdfReader(file)
-    return "".join([page.extract_text() for page in reader.pages])
+    full_text = "".join([page.extract_text() for page in reader.pages])
+    full_text = full_text.replace("\n", " ")
+    return full_text
 
 
 # External API requests functions
@@ -34,10 +48,10 @@ def ss_search_paper(query):
     Search for papers using the Semantic Scholar API.
 
     Args:
-    query: The search query string.
+    query (str): The search query string.
 
     Returns:
-    The JSON response from the Semantic Scholar API.
+    dict: The JSON response from the Semantic Scholar API.
 
     Raises:
     HTTPException: If the Semantic Scholar API request fails.
@@ -55,7 +69,7 @@ def ss_search_paper(query):
             status_code=ss_response.status_code, detail="Error in Semantic Scholar API"
         )
 
-    return ss_response.json()["data"]
+    return ss_response.json()["data"][0]
 
 
 # Routes
@@ -82,16 +96,13 @@ def search_route(
     Returns:
     The processed data of the first search result.
     """
-    ss_search_result = ss_search_paper(query)
-    if not ss_search_result:
+    paper = ss_search_paper(query)
+    if not paper:
         raise HTTPException(status_code=404, detail="No papers found")
-    paper = ss_search_result[0]
     full_text = fetch_and_read_pdf(paper["openAccessPdf"]["url"])
     paper.update({"full_text": full_text})
     return {"message": "Data processed", "result": paper}
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
